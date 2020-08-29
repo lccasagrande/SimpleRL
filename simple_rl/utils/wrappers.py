@@ -1,15 +1,15 @@
 
-import time
-import json
-import csv
-import os.path as osp
 from abc import ABC, abstractmethod
-from collections import deque, defaultdict
-from multiprocessing import Process, Pipe
+from collections import defaultdict, deque
+import csv
+import json
+from multiprocessing import Pipe, Process
+import os.path as osp
+import time
 
-import numpy as np
 import gym
 from gym import Wrapper, spaces
+import numpy as np
 
 from .common import tile_images
 
@@ -417,10 +417,6 @@ def make_vec_env(env_id, num_envs, sequential=False, seed=None, monitor_dir=None
 
     if num_envs <= 0:
         raise ValueError("Incorrect number of environments (num_envs > 0)")
-    for wrapper in env_wrappers:
-        if not isinstance(wrapper, Wrapper):
-            raise ValueError(
-                "Incorrect env wrapper (Expected a gym.Wrapper instance)")
 
     if num_envs == 1 or sequential:
         return DummyVecEnv([make_env(i) for i in range(num_envs)])

@@ -1,14 +1,13 @@
-import time
 from collections import defaultdict, deque
-
+import time
 
 import gym
 import gym.spaces as spaces
 import numpy as np
 import tensorflow as tf
 
-from ..utils.common import random_choices
 from ..utils.agents import ActorCriticVecAgent
+from ..utils.common import random_choices
 from ..utils.estimators import GeneralizedAdvantageEstimator
 
 
@@ -52,8 +51,12 @@ class ProximalPolicyOptimization(ActorCriticVecAgent):
         get_clip_vl = clip_vl if callable(clip_vl) else lambda _: clip_vl
         states, nupdates, transitions, history = self.env.reset(), 0, [], []
         optimizer_stats = {}
+        tstart, elapsed_time, fps = time.time(), np.nan, np.nan
         for global_step in range(1, timesteps + 1):
-            tstart = time.time()
+            # Logging
+            if global_step == 1 or global_step % self.refresh_rate == 0:
+                p = np.round(global_step / timesteps * 100, 2)
+                print(f"\r| Progress: {p:03.02f}", end='\r', flush=True)
 
             # Get Action
             probs, states_vl = self.model.predict(states)
@@ -80,19 +83,17 @@ class ProximalPolicyOptimization(ActorCriticVecAgent):
                     transitions, batch_size, clip, entropy_coef, vf_coef, epochs)
                 transitions = []
                 nupdates += 1
+                elapsed_time = time.time() - tstart
+                fps = (self.steps_per_update *
+                       self.env.num_envs) / elapsed_time
 
-            # Logging
-            if global_step == 1 or global_step % self.refresh_rate == 0:
                 stats = history[-self.refresh_rate:]
                 nep = len(history)
                 eprew = np.nan if nep == 0 else [h['score'] for h in stats]
                 eplen = np.nan if nep == 0 else [h['nsteps'] for h in stats]
 
-                elapsed_time = time.time() - tstart
-                fps = (self.steps_per_update *
-                       self.env.num_envs) / elapsed_time
-                logger.log('elapsed_time', round(elapsed_time, 5))
-                logger.log('progress', round(global_step / timesteps, 2))
+                logger.log('elapsed_time', np.round(elapsed_time, 5))
+                logger.log('progress', np.round(global_step / timesteps, 2))
                 logger.log('nupdates', nupdates)
                 logger.log('fps', int(fps))
                 logger.log('nepisodes', nep)
@@ -103,6 +104,8 @@ class ProximalPolicyOptimization(ActorCriticVecAgent):
                 for k, v in optimizer_stats.items():
                     logger.log(k, float(v))
                 logger.dump()
+
+                tstart = time.time()
 
         return history
 
