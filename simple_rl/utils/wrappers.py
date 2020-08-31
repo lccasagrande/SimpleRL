@@ -1,21 +1,21 @@
 
-import time
-import json
-import csv
-import os.path as osp
 from abc import ABC, abstractmethod
-from collections import deque, defaultdict
-from multiprocessing import Process, Pipe
+from collections import defaultdict, deque
+import csv
+import json
+from multiprocessing import Pipe, Process
+import os.path as osp
+import time
 
-import numpy as np
 import gym
-from gym import spaces, Env
+from gym import Env, spaces
 
 from .common import tile_images
 
 
 class DynamicWrapper(Env):
     """Wraps the environment to allow a modular transformation."""
+
     def __init__(self, env):
         self.env = env
         self._observation_space = self.env.observation_space
@@ -25,7 +25,8 @@ class DynamicWrapper(Env):
 
     def __getattr__(self, name):
         if name.startswith('_'):
-            raise AttributeError("attempted to get missing private attribute '{}'".format(name))
+            raise AttributeError(
+                "attempted to get missing private attribute '{}'".format(name))
         return getattr(self.env, name)
 
     @property
@@ -35,7 +36,7 @@ class DynamicWrapper(Env):
     @property
     def observation_space(self):
         return self._observation_space
-        
+
     @property
     def spec(self):
         return self.env.spec
@@ -87,6 +88,7 @@ class ObservationDynamicWrapper(DynamicWrapper):
 
     def observation(self, observation):
         raise NotImplementedError
+
 
 class AgentWorker():
     def __call__(self, remote, env_fn_wrapper):
@@ -404,7 +406,8 @@ class Monitor(DynamicWrapper):
         self.episode_lengths = []
         self.episode_times = []
         self.total_steps = 0
-        self.fieldnames = tuple(['score', 'nsteps', 'time']) + tuple(self.info_kws)
+        self.fieldnames = tuple(
+            ['score', 'nsteps', 'time']) + tuple(self.info_kws)
 
     def step(self, action):
         if self.needs_reset:
@@ -417,7 +420,7 @@ class Monitor(DynamicWrapper):
         s = super().reset(**kwargs)
         self.rewards = []
         self.needs_reset = False
-        return s 
+        return s
 
     def _update(self, action, rew, done, info):
         self.rewards.append(rew)
