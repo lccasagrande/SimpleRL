@@ -1,7 +1,7 @@
 from setuptools import setup
 
 
-setup(name='SimpleRL',
+setup(name='simplerl',
       author='lccasagrande',
       license="MIT",
       version='0.1',

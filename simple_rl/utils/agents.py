@@ -70,7 +70,7 @@ class TabularAgent(Agent):
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
         self.refresh_rate = refresh_rate
-        self.model = defaultdict(lambda: np.zeros(self.env.action_space.n))
+        self.model = defaultdict(lambda: np.zeros(self.env.unwrapped.action_space.n))
 
     def act(self, state, epsilon=0):
         """Select the action for state.
@@ -87,7 +87,7 @@ class TabularAgent(Agent):
         if np.random.random() >= epsilon:
             return np.argmax(self.model[state])
         else:
-            return np.random.choice(self.env.action_space.n)
+            return np.random.choice(self.env.unwrapped.action_space.n)
 
     def save(self, fn):
         with open(fn, 'wb') as f:

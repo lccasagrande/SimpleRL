@@ -9,10 +9,84 @@ from multiprocessing import Process, Pipe
 
 import numpy as np
 import gym
-from gym import Wrapper, spaces
+from gym import spaces, Env
 
 from .common import tile_images
 
+
+class DynamicWrapper(Env):
+    """Wraps the environment to allow a modular transformation."""
+    def __init__(self, env):
+        self.env = env
+        self._observation_space = self.env.observation_space
+        self._action_space = self.env.action_space
+        self.reward_range = self.env.reward_range
+        self.metadata = self.env.metadata
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError("attempted to get missing private attribute '{}'".format(name))
+        return getattr(self.env, name)
+
+    @property
+    def action_space(self):
+        return self._action_space
+
+    @property
+    def observation_space(self):
+        return self._observation_space
+        
+    @property
+    def spec(self):
+        return self.env.spec
+
+    @classmethod
+    def class_name(cls):
+        return cls.__name__
+
+    def step(self, action):
+        return self.env.step(action)
+
+    def reset(self, **kwargs):
+        s = self.env.reset(**kwargs)
+        self._observation_space = self.env.observation_space
+        self._action_space = self.env.action_space
+        return s
+
+    def render(self, mode='human', **kwargs):
+        return self.env.render(mode, **kwargs)
+
+    def close(self):
+        return self.env.close()
+
+    def seed(self, seed=None):
+        return self.env.seed(seed)
+
+    def compute_reward(self, achieved_goal, desired_goal, info):
+        return self.env.compute_reward(achieved_goal, desired_goal, info)
+
+    def __str__(self):
+        return '<{}{}>'.format(type(self).__name__, self.env)
+
+    def __repr__(self):
+        return str(self)
+
+    @property
+    def unwrapped(self):
+        return self.env.unwrapped
+
+
+class ObservationDynamicWrapper(DynamicWrapper):
+    def reset(self, **kwargs):
+        observation = super().reset(**kwargs)
+        return self.observation(observation)
+
+    def step(self, action):
+        observation, reward, done, info = self.env.step(action)
+        return self.observation(observation), reward, done, info
+
+    def observation(self, observation):
+        raise NotImplementedError
 
 class AgentWorker():
     def __call__(self, remote, env_fn_wrapper):
@@ -75,9 +149,17 @@ class VecEnv(ABC):
 
     def __init__(self, num_envs, observation_space, action_space):
         self.num_envs = num_envs
-        self.observation_space = observation_space
-        self.action_space = action_space
+        self._observation_space = observation_space
+        self._action_space = action_space
         self._viewer = None
+
+    @property
+    def action_space(self):
+        return self._action_space
+
+    @property
+    def observation_space(self):
+        return self._observation_space
 
     @property
     def unwrapped(self):
@@ -153,6 +235,8 @@ class DummyVecEnv(VecEnv):
 
     def reset(self):
         obs = [self.envs[e].reset() for e in range(self.num_envs)]
+        self._observation_space = self.envs[0].observation_space
+        self._action_space = self.envs[0].action_space
         return np.stack(obs)
 
     def get_images(self):
@@ -213,7 +297,14 @@ class SubprocVecEnv(VecEnv):
         for remote in self.remotes:
             remote.send(('reset', None))
 
-        return np.stack([remote.recv() for remote in self.remotes])
+        s = np.stack([remote.recv() for remote in self.remotes])
+
+        # Update spaces
+        self.remotes[0].send(('get_spaces', None))
+        a, o = self.remotes[0].recv()
+        self._action_space = a
+        self._observation_space = o
+        return s
 
     def close(self):
         if self.closed:
@@ -298,23 +389,22 @@ class VecFrameStack(VecEnvWrapper):
     def reset(self):
         self.stackedobs[...] = 0
         self._stack(self.venv.reset())
+        self._action_space = self.venv.action_space
         return self.stackedobs
 
 
-class Monitor(Wrapper):
+class Monitor(DynamicWrapper):
     def __init__(self, env, info_kws=()):
         super().__init__(env)
         self.tstart = time.time()
         self.info_kws = info_kws
-        self.actions = None
         self.rewards = None
         self.needs_reset = True
         self.episode_rewards = []
         self.episode_lengths = []
         self.episode_times = []
         self.total_steps = 0
-        self.fieldnames = tuple(
-            ['score', 'nsteps', 'time'] + [str(i) for i in range(env.action_space.n)]) + tuple(info_kws)
+        self.fieldnames = tuple(['score', 'nsteps', 'time']) + tuple(self.info_kws)
 
     def step(self, action):
         if self.needs_reset:
@@ -324,22 +414,19 @@ class Monitor(Wrapper):
         return ob, rew, done, info
 
     def reset(self, **kwargs):
+        s = super().reset(**kwargs)
         self.rewards = []
-        self.actions = [0] * self.env.action_space.n
         self.needs_reset = False
-        return self.env.reset(**kwargs)
+        return s 
 
     def _update(self, action, rew, done, info):
         self.rewards.append(rew)
-        self.actions[action] += 1
         if done:
             self.needs_reset = True
             eprew = sum(self.rewards)
             eplen = len(self.rewards)
             epinfo = {"score": round(eprew, 6), "nsteps": eplen, "time": round(
                 time.time() - self.tstart, 6)}
-            for k, v in enumerate(self.actions):
-                epinfo[str(k)] = v / eplen
             for k in self.info_kws:
                 epinfo[k] = info[k]
             self.episode_rewards.append(eprew)
@@ -417,10 +504,6 @@ def make_vec_env(env_id, num_envs, sequential=False, seed=None, monitor_dir=None
 
     if num_envs <= 0:
         raise ValueError("Incorrect number of environments (num_envs > 0)")
-    for wrapper in env_wrappers:
-        if not isinstance(wrapper, Wrapper):
-            raise ValueError(
-                "Incorrect env wrapper (Expected a gym.Wrapper instance)")
 
     if num_envs == 1 or sequential:
         return DummyVecEnv([make_env(i) for i in range(num_envs)])
